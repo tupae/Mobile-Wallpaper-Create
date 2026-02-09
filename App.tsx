@@ -1,21 +1,20 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, GeneratedImage, WallpaperStyle } from './types';
 import { WALLPAPER_STYLES } from './constants';
-import { generateWallpaper } from './services/geminiService';
+import { generateWallpaper, testConnection } from './services/geminiService';
 import StyleCard from './components/StyleCard';
 
 // Extend window for AI Studio helpers
 declare global {
-  // Define AIStudio interface to resolve subsequent property declaration errors
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
   }
 
   interface Window {
-    // Use readonly and AIStudio interface to match environmental definitions
-    readonly aistudio: AIStudio;
+    // Fix: Remove readonly to avoid "identical modifiers" error if declared elsewhere
+    aistudio: AIStudio;
   }
 }
 
@@ -27,6 +26,11 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Settings Modal state
+  const [showSettings, setShowSettings] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testStatus, setTestStatus] = useState<'none' | 'success' | 'fail'>('none');
 
   // Load history from localStorage
   useEffect(() => {
@@ -48,11 +52,9 @@ const App: React.FC = () => {
       if (!hasKey) {
         await window.aistudio.openSelectKey();
       }
-      // Proceed to the app assuming key selection was successful to avoid race conditions
       setCurrentScreen(AppState.GENERATOR);
     } catch (err) {
       console.error("Auth check failed", err);
-      // Proceed anyway as per guidelines
       setCurrentScreen(AppState.GENERATOR);
     }
   };
@@ -75,7 +77,6 @@ const App: React.FC = () => {
       saveToHistory(newImg);
       setCurrentScreen(AppState.PREVIEW);
     } catch (err: any) {
-      // Reset key selection if entity not found
       if (err.message === "AUTH_ERROR") {
         await window.aistudio.openSelectKey();
       } else {
@@ -84,6 +85,19 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setTestStatus('none');
+    const result = await testConnection();
+    setTestStatus(result ? 'success' : 'fail');
+    setIsTesting(false);
+  };
+
+  const handleOpenKeySelector = async () => {
+    await window.aistudio.openSelectKey();
+    setTestStatus('none');
   };
 
   const downloadImage = (url: string) => {
@@ -111,6 +125,80 @@ const App: React.FC = () => {
     }
   };
 
+  const renderSettingsModal = () => {
+    if (!showSettings) return null;
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-bold">API 및 설정 관리</h3>
+            <button onClick={() => setShowSettings(false)} className="text-slate-500 text-xl">
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          
+          <div className="space-y-6">
+            <div className="bg-slate-800/50 p-4 rounded-2xl">
+              <p className="text-sm text-slate-400 leading-relaxed">
+                본 앱은 <span className="text-blue-400 font-semibold">Google AI Studio</span>의 외부 API 연동 시스템을 사용합니다. API 키는 로컬 환경에 안전하게 관리되며, 필요 시 언제든지 변경할 수 있습니다.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <button 
+                onClick={handleOpenKeySelector}
+                className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-bold transition-all flex items-center justify-center gap-2 border border-slate-700"
+              >
+                <i className="fas fa-key text-blue-400"></i>
+                API 키 선택/변경
+              </button>
+              
+              <button 
+                onClick={handleTestConnection}
+                disabled={isTesting}
+                className={`w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 ${
+                  isTesting ? 'bg-slate-800 text-slate-500' : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30'
+                }`}
+              >
+                {isTesting ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-plug"></i>}
+                연결 테스트 실행
+              </button>
+
+              {testStatus === 'success' && (
+                <p className="text-center text-emerald-400 text-sm font-medium animate-in fade-in slide-in-from-top-2">
+                  <i className="fas fa-check-circle mr-1"></i> 연결이 활성화되었습니다.
+                </p>
+              )}
+              {testStatus === 'fail' && (
+                <p className="text-center text-red-400 text-sm font-medium animate-in fade-in slide-in-from-top-2">
+                  <i className="fas fa-exclamation-triangle mr-1"></i> 연결에 실패했습니다. 키를 확인해 주세요.
+                </p>
+              )}
+            </div>
+            
+            <button 
+              onClick={() => setShowSettings(false)}
+              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-900/40"
+            >
+              확인
+            </button>
+
+            <div className="text-center">
+              <a 
+                href="https://ai.google.dev/gemini-api/docs/billing" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-xs text-slate-500 underline hover:text-slate-400"
+              >
+                유료 결제 및 API 사용 가이드
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderScreen = () => {
     switch (currentScreen) {
       case AppState.SPLASH:
@@ -131,10 +219,6 @@ const App: React.FC = () => {
             >
               시작하기
             </button>
-            <p className="mt-6 text-xs text-slate-500">
-              High-Quality 이미지 생성을 위해 API 키가 필요합니다.<br/>
-              <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline">유료 프로젝트 API 키</a>를 선택해주세요.
-            </p>
           </div>
         );
 
@@ -144,12 +228,20 @@ const App: React.FC = () => {
             {/* Header */}
             <header className="p-6 flex justify-between items-center">
               <h2 className="text-xl font-bold">배경화면 생성</h2>
-              <button 
-                onClick={() => setCurrentScreen(AppState.HISTORY)}
-                className="p-3 bg-slate-800 rounded-full text-blue-400"
-              >
-                <i className="fas fa-history text-lg"></i>
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setShowSettings(true)}
+                  className="p-3 bg-slate-800 rounded-full text-slate-400 hover:text-white"
+                >
+                  <i className="fas fa-cog text-lg"></i>
+                </button>
+                <button 
+                  onClick={() => setCurrentScreen(AppState.HISTORY)}
+                  className="p-3 bg-slate-800 rounded-full text-blue-400 hover:text-blue-300"
+                >
+                  <i className="fas fa-history text-lg"></i>
+                </button>
+              </div>
             </header>
 
             {/* Main Content */}
@@ -231,11 +323,16 @@ const App: React.FC = () => {
       case AppState.HISTORY:
         return (
           <div className="flex flex-col h-full bg-slate-950">
-            <header className="p-6 flex items-center gap-4">
-              <button onClick={() => setCurrentScreen(AppState.GENERATOR)} className="p-2 -ml-2">
-                <i className="fas fa-arrow-left text-xl"></i>
+            <header className="p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setCurrentScreen(AppState.GENERATOR)} className="p-2 -ml-2">
+                  <i className="fas fa-arrow-left text-xl"></i>
+                </button>
+                <h2 className="text-xl font-bold">최근 생성 기록</h2>
+              </div>
+              <button onClick={() => setShowSettings(true)} className="p-3 bg-slate-800 rounded-full text-slate-400">
+                <i className="fas fa-cog text-lg"></i>
               </button>
-              <h2 className="text-xl font-bold">최근 생성 기록</h2>
             </header>
             
             <div className="flex-1 overflow-y-auto px-6 pb-6">
@@ -253,7 +350,7 @@ const App: React.FC = () => {
                         setCurrentImage(img);
                         setCurrentScreen(AppState.PREVIEW);
                       }}
-                      className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-900 border border-slate-800 active:scale-95 transition-transform"
+                      className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-900 border border-slate-800 active:scale-95 transition-transform shadow-lg"
                     >
                       <img src={img.url} alt={img.prompt} className="w-full h-full object-cover" loading="lazy" />
                     </div>
@@ -275,7 +372,6 @@ const App: React.FC = () => {
                 className="w-full h-full object-cover"
               />
               
-              {/* UI Overlay Simulation */}
               <div className="absolute inset-0 p-12 pointer-events-none flex flex-col items-center">
                  <div className="text-white text-6xl font-thin mt-12 mb-2 drop-shadow-lg">
                    {new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -294,11 +390,10 @@ const App: React.FC = () => {
                  <div className="w-32 h-1.5 bg-white/50 rounded-full"></div>
               </div>
 
-              {/* Action Buttons */}
               <div className="absolute top-6 left-6 right-6 flex justify-between">
                 <button 
                   onClick={() => setCurrentScreen(AppState.GENERATOR)}
-                  className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white"
+                  className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white active:scale-90 transition-transform"
                 >
                   <i className="fas fa-times"></i>
                 </button>
@@ -308,14 +403,14 @@ const App: React.FC = () => {
             <div className="p-6 pb-12 bg-slate-900 flex gap-4 safe-bottom">
               <button 
                 onClick={() => downloadImage(currentImage.url)}
-                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-bold flex items-center justify-center gap-2"
+                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-colors"
               >
                 <i className="fas fa-download"></i>
                 저장하기
               </button>
               <button 
                 onClick={() => shareImage(currentImage.url)}
-                className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2"
+                className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-blue-900/40"
               >
                 <i className="fas fa-share-alt"></i>
                 공유하기
@@ -330,8 +425,9 @@ const App: React.FC = () => {
   };
 
   return (
-    <main className="max-w-md mx-auto h-screen relative shadow-2xl overflow-hidden">
+    <main className="max-w-md mx-auto h-screen relative shadow-2xl overflow-hidden bg-slate-950">
       {renderScreen()}
+      {renderSettingsModal()}
     </main>
   );
 };

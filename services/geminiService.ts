@@ -50,3 +50,24 @@ export const generateWallpaper = async (userPrompt: string, stylePrompt: string)
     throw error;
   }
 };
+
+/**
+ * Performs a lightweight connection test to verify the current API key.
+ */
+export const testConnection = async (): Promise<boolean> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: "Hello",
+      config: {
+        maxOutputTokens: 10,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    });
+    return !!response.text;
+  } catch (error) {
+    console.error("Connection test failed:", error);
+    return false;
+  }
+};
